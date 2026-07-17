@@ -55,11 +55,70 @@ index 2fdee69..549c2f7 100644
  #undef __arm__
  #undef __thumb__
  #undef __thumb2__
+diff --git a/bsp/imxrt/components/openmv-nxp/omv/fb_alloc.c b/bsp/imxrt/components/openmv-nxp/omv/fb_alloc.c
+index 7e27d7a..8f2275e 100644
+--- a/bsp/imxrt/components/openmv-nxp/omv/fb_alloc.c
++++ b/bsp/imxrt/components/openmv-nxp/omv/fb_alloc.c
+@@ -11,7 +11,7 @@
+ #include "framebuffer.h"
+ #include "omv_boardconfig.h"
+ 
+-#if defined(__CC_ARM) || defined(__CLANG_ARM)
++#if defined(__CC_ARM) || defined(__CLANG_ARM) || defined(__GNUC__)
+     extern char Image$$OMV_FB_END$$Base;
+     #define _fballoc Image$$OMV_FB_END$$Base
+     #if defined(OMV_FB_OVERLAY_MEMORY)
+diff --git a/bsp/imxrt/components/openmv-nxp/omv/img/fmath.c b/bsp/imxrt/components/openmv-nxp/omv/img/fmath.c
+index a428ecc..83d91ab 100644
+--- a/bsp/imxrt/components/openmv-nxp/omv/img/fmath.c
++++ b/bsp/imxrt/components/openmv-nxp/omv/img/fmath.c
+@@ -107,7 +107,7 @@ float fast_cbrtf(float x)
+ }
+ #if defined(__CC_ARM) || defined(__CLANG_ARM) || (defined (__ARMCC_VERSION) && (__ARMCC_VERSION >= 6010050)) 
+ #else
+-float ALWAYS_INLINE fast_fabsf(float x)
++float fast_fabsf(float x)
+ {
+     asm volatile (
+             "vabs.f32  %[r], %[x]\n"
+diff --git a/bsp/imxrt/components/openmv-nxp/omv_main.c b/bsp/imxrt/components/openmv-nxp/omv_main.c
+index 491004f..1407095 100644
+--- a/bsp/imxrt/components/openmv-nxp/omv_main.c
++++ b/bsp/imxrt/components/openmv-nxp/omv_main.c
+@@ -32,7 +32,7 @@
+ #include "usbdbg.h"
+ 
+ volatile uint8_t g_isMainDotPyRunning;
+-#if defined(__CC_ARM) || defined (__CLANG_ARM)
++#if defined(__CC_ARM) || defined (__CLANG_ARM) || defined(__GNUC__)
+ 	#define STACK_SIZE	(0x2000)
+ 	extern unsigned int Image$$RTT_MPY_THREAD_STACK$$Base;
+ 	extern unsigned int Image$$MPY_HEAP_START$$Base;
 diff --git a/bsp/imxrt/imxrt1062-nxp-evk/board/SConscript b/bsp/imxrt/imxrt1062-nxp-evk/board/SConscript
-index 6d15c6b..7e6cb4a 100644
+index 6d15c6b..d586065 100644
 --- a/bsp/imxrt/imxrt1062-nxp-evk/board/SConscript
 +++ b/bsp/imxrt/imxrt1062-nxp-evk/board/SConscript
-@@ -19,7 +19,7 @@ if GetDepend(['NXP_USING_MICROPYTHON']):
+@@ -7,19 +7,24 @@ cwd = GetCurrentDir()
+ src = []
+ # add the general drivers.
+ src += ["board.c"]
++if rtconfig.PLATFORM == 'gcc':
++	src += ["gcc_compat.c"]
+ src += ["MCUX_Config/clock_config.c"]
+ src += ["MCUX_Config/pin_mux.c"]
+ 
+ if GetDepend(['NXP_USING_MICROPYTHON']):
+ 	src += ['pins_imxrtevk106x.c']
+-	print("Generate PINs files...")
+-	cmd = 'python .\make-pins.py -b .\pins.csv --af .\mimxrt105x_af.csv --pinmap .\mimxrt105x_pinmap.csv --prefix mimxrt105x_prefix.c --qstr .\pins_qstr.h --af-const .\pins_af_const.h --af-py .\pins_af.py > pins_imxrtevk106x.c'
+-	os.popen(cmd)
++	if os.name == 'nt':
++		# Windows-only: regenerating on other hosts clobbers the checked-in
++		# file because the command uses backslash paths.
++		print("Generate PINs files...")
++		cmd = 'python .\make-pins.py -b .\pins.csv --af .\mimxrt105x_af.csv --pinmap .\mimxrt105x_pinmap.csv --prefix mimxrt105x_prefix.c --qstr .\pins_qstr.h --af-const .\pins_af_const.h --af-py .\pins_af.py > pins_imxrtevk106x.c'
++		os.popen(cmd)
+ 	
  
  CPPPATH = [cwd,cwd + '/MCUX_Config',cwd + '/ports']
  
@@ -68,3 +127,533 @@ index 6d15c6b..7e6cb4a 100644
  
  LOCAL_CCFLAGS = ''    
  if rtconfig.CROSS_TOOL == 'gcc':
+diff --git a/bsp/imxrt/imxrt1062-nxp-evk/board/board.c b/bsp/imxrt/imxrt1062-nxp-evk/board/board.c
+index 9bd5d00..a683994 100644
+--- a/bsp/imxrt/imxrt1062-nxp-evk/board/board.c
++++ b/bsp/imxrt/imxrt1062-nxp-evk/board/board.c
+@@ -953,9 +953,15 @@ void rt_hw_board_init()
+ #endif
+ 
+ #ifdef NXP_USING_OMV_TFLITE
++#if defined(__GNUC__) && !defined(__CC_ARM) && !defined(__CLANG_ARM)
++	/* run C++ static constructors (armlink does this via $Super$$ patching) */
++	extern void __libc_init_array(void);
++	__libc_init_array();
++#else
+ 	extern void $Super$$__cpp_initialize__aeabi_();
+ 	$Super$$__cpp_initialize__aeabi_();
+ #endif
++#endif
+ 
+ #ifdef RT_USING_COMPONENTS_INIT
+     rt_components_board_init();
+diff --git a/bsp/imxrt/imxrt1062-nxp-evk/board/gcc_compat.c b/bsp/imxrt/imxrt1062-nxp-evk/board/gcc_compat.c
+new file mode 100644
+index 0000000..d4598b1
+--- /dev/null
++++ b/bsp/imxrt/imxrt1062-nxp-evk/board/gcc_compat.c
+@@ -0,0 +1,88 @@
++/*
++ * GNU toolchain compatibility shims.
++ *
++ * The prebuilt ML libraries (libtf*.a, libnncie*.a) were built with armclang
++ * against the ARM C library and libc++. When linking with GNU newlib these
++ * shims satisfy their unresolved references:
++ *  - __hardfp_* : armclang hard-float math entry points -> newlib libm
++ *  - __aeabi_assert / __aeabi_errno_addr / __stderr : ARM C library runtime
++ *  - std::__1::* / operator new/delete iostream bits : libc++ leftovers;
++ *    iostreams are unused on target, so the Init stubs are no-ops, and the
++ *    error-throw paths trap hard so misuse is visible on a debugger.
++ */
++#if defined(__GNUC__) && !defined(__CC_ARM) && !defined(__CLANG_ARM)
++
++#include <math.h>
++#include <errno.h>
++
++extern void rt_kprintf(const char *fmt, ...);
++
++__attribute__((visibility("hidden"))) void *__dso_handle;
++
++/* ARM C library assert/errno */
++void __aeabi_assert(const char *expr, const char *file, int line)
++{
++    rt_kprintf("assert(%s) failed: %s:%d\n", expr, file, line);
++    for (;;) {}
++}
++
++volatile int *__aeabi_errno_addr(void)
++{
++    return &errno;
++}
++
++/* Consumed by armclang objects doing fprintf(stderr, ...); the ARM clib FILE
++ * layout differs from newlib's, so give it inert zeroed storage. Output sent
++ * here is dropped. */
++char __stderr[88];
++
++/* armclang hard-float math entry points */
++float  __hardfp_acosf(float x)            { return acosf(x); }
++float  __hardfp_cosf(float x)             { return cosf(x); }
++double __hardfp_exp(double x)             { return exp(x); }
++float  __hardfp_expf(float x)             { return expf(x); }
++float  __hardfp_expm1f(float x)           { return expm1f(x); }
++float  __hardfp_fmodf(float x, float y)   { return fmodf(x, y); }
++double __hardfp_frexp(double x, int *e)   { return frexp(x, e); }
++float  __hardfp_logf(float x)             { return logf(x); }
++float  __hardfp_sinf(float x)             { return sinf(x); }
++float  __hardfp_sqrtf(float x)            { return sqrtf(x); }
++float  __hardfp_tanhf(float x)            { return tanhf(x); }
++
++/* operator new/delete backed by the RT-Thread heap (the armclang libs and
++ * -lstdc++ ordering make pulling these from libstdc++ unreliable). */
++extern void *rt_malloc(unsigned size);
++extern void rt_free(void *ptr);
++
++void *_Znwj(unsigned size)  { return rt_malloc(size ? size : 1); }  /* operator new */
++void *_Znaj(unsigned size)  { return rt_malloc(size ? size : 1); }  /* operator new[] */
++void _ZdlPv(void *p)        { if (p) rt_free(p); }                  /* operator delete */
++void _ZdaPv(void *p)        { if (p) rt_free(p); }                  /* operator delete[] */
++void _ZdlPvj(void *p, unsigned size) { (void)size; if (p) rt_free(p); }
++void _ZdaPvj(void *p, unsigned size) { (void)size; if (p) rt_free(p); }
++
++/* std::__1::ios_base::Init::Init() / ~Init() (complete + base variants) */
++void _ZNSt3__18ios_base4InitC1Ev(void *self) { (void)self; }
++void _ZNSt3__18ios_base4InitC2Ev(void *self) { (void)self; }
++void _ZNSt3__18ios_base4InitD1Ev(void *self) { (void)self; }
++void _ZNSt3__18ios_base4InitD2Ev(void *self) { (void)self; }
++
++/* std::__1::__vector_base_common<true>::__throw_length_error() const */
++void _ZNKSt3__120__vector_base_commonILb1EE20__throw_length_errorEv(void *self)
++{
++    (void)self;
++    rt_kprintf("libc++ vector length_error\n");
++    for (;;) {}
++}
++
++/* std::__1::basic_string<char>::operator=(basic_string const&) */
++void *_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEEaSERKS5_(
++    void *self, const void *other)
++{
++    (void)other;
++    rt_kprintf("libc++ string assign unsupported\n");
++    for (;;) {}
++    return self;
++}
++
++#endif
+diff --git a/bsp/imxrt/imxrt1062-nxp-evk/board/linker_scripts/link.lds b/bsp/imxrt/imxrt1062-nxp-evk/board/linker_scripts/link.lds
+new file mode 100644
+index 0000000..665986a
+--- /dev/null
++++ b/bsp/imxrt/imxrt1062-nxp-evk/board/linker_scripts/link.lds
+@@ -0,0 +1,380 @@
++/*
++ * GNU ld linker script for OpenART on MIMXRT1062-EVK (XIP QSPI flash + SDRAM).
++ *
++ * Ported from the Keil scatter file (link.sct) and the NXP SDK GCC script
++ * (MIMXRT1062xxxxx_flexspi_nor_sdram.ld). Memory regions assume the RT1062
++ * fused-default FlexRAM banking: 128K ITCM / 128K DTCM / 256K FlexRAM OCRAM,
++ * plus the dedicated 512K OCRAM2 at 0x20200000 (used contiguously as 768K).
++ *
++ * The Keil-style Image$$/Load$$ symbols consumed by OpenART sources
++ * (board.h, mpy_main.c, omv_main.c, fb_alloc.c, framebuffer.c, py_tf.c,
++ * py_nncu.c) are PROVIDEd here so those sources need no further changes.
++ *
++ * Sizes mirrored from link.sct / rtconfig.h:
++ *   stack (MSP)                 0x2000
++ *   fb_alloc overlay            120K   (OMV_FB_ALLOC_OVERLAY_SIZE)
++ *   weight cache                61440  (WEIT_CACHE_SIZE)
++ *   RT-Thread heap              128K   (RTT_HEAP_SIZE)
++ *   MicroPython thread stack    32768  (NXP_MICROPYTHON_THREAD_STACK_SIZE)
++ *   MicroPython gc heap         4M     (PKG_MICROPYTHON_HEAP_SIZE)
++ *   sensor buffer               6M
++ *   OMV main framebuffer        4*720*1280 + (10M - 4*720*1280) = 10M
++ *   LCD framebuffer             1M
++ */
++
++ENTRY(Reset_Handler)
++
++STACK_SIZE            = 0x2000;
++NEWLIB_HEAP_SIZE      = 0x1000;
++FB_ALLOC_OVERLAY_SIZE = 120K;
++WEIT_CACHE_SIZE       = 61440;
++RTT_HEAP_SIZE         = 128K;
++MPY_THREAD_STACK_SIZE = 32768;
++MPY_HEAP_SIZE         = 4M;
++SENSOR_BUFFER_SIZE    = 6M;
++OMV_FB_TOTAL_SIZE     = 10M;
++LCD_FB_SIZE           = 1M;
++
++MEMORY
++{
++  m_flash_config (RX) : ORIGIN = 0x60000000, LENGTH = 0x00001000
++  m_ivt          (RX) : ORIGIN = 0x60001000, LENGTH = 0x00001000
++  m_interrupts   (RX) : ORIGIN = 0x60002000, LENGTH = 0x00000400
++  m_text         (RX) : ORIGIN = 0x60002400, LENGTH = 0x007FDC00
++  /* first 1K of ITCM is reserved for a RAM vector table */
++  m_itcm         (RX) : ORIGIN = 0x00000400, LENGTH = 0x0001FC00
++  m_dtcm         (RW) : ORIGIN = 0x20000000, LENGTH = 0x00020000
++  m_ocram        (RW) : ORIGIN = 0x20200000, LENGTH = 0x000C0000
++  m_sdram        (RW) : ORIGIN = 0x80000000, LENGTH = 0x01E00000
++  m_ncache       (RW) : ORIGIN = 0x81E00000, LENGTH = 0x00200000
++}
++
++SECTIONS
++{
++  .flash_config :
++  {
++    . = ALIGN(4);
++    __FLASH_BASE = .;
++    KEEP(* (.boot_hdr.conf))
++    . = ALIGN(4);
++  } > m_flash_config
++
++  ivt_begin = ORIGIN(m_flash_config) + LENGTH(m_flash_config);
++
++  .ivt : AT(ivt_begin)
++  {
++    . = ALIGN(4);
++    KEEP(* (.boot_hdr.ivt))
++    KEEP(* (.boot_hdr.boot_data))
++    KEEP(* (.boot_hdr.dcd_data))
++    . = ALIGN(4);
++  } > m_ivt
++
++  .interrupts :
++  {
++    __VECTOR_TABLE = .;
++    . = ALIGN(4);
++    KEEP(*(.isr_vector))
++    . = ALIGN(4);
++  } > m_interrupts
++
++  __VECTOR_RAM = 0x00000000;
++  __RAM_VECTOR_TABLE_SIZE_BYTES = 0x0;
++  PROVIDE(Image$$VECTOR_ROM$$Base = __VECTOR_TABLE);
++  PROVIDE(Image$$VECTOR_RAM$$Base = __VECTOR_RAM);
++
++  .text :
++  {
++    . = ALIGN(4);
++    *(EXCLUDE_FILE(*fsl_flexspi.o *fsl_flash.o *drv_norflash.o *fsl_clock.o) .text)
++    *(EXCLUDE_FILE(*fsl_flexspi.o *fsl_flash.o *drv_norflash.o *fsl_clock.o) .text*)
++    *(.rodata)
++    *(.rodata*)
++    *(.glue_7)
++    *(.glue_7t)
++    *(.eh_frame)
++    KEEP (*(.init))
++    KEEP (*(.fini))
++
++    /* RT-Thread component init functions and FinSH symbol tables */
++    . = ALIGN(4);
++    __fsymtab_start = .;
++    KEEP(*(FSymTab))
++    __fsymtab_end = .;
++    . = ALIGN(4);
++    __vsymtab_start = .;
++    KEEP(*(VSymTab))
++    __vsymtab_end = .;
++    . = ALIGN(4);
++    __rt_init_start = .;
++    KEEP(*(SORT(.rti_fn*)))
++    __rt_init_end = .;
++    . = ALIGN(4);
++  } > m_text
++
++  .ARM.extab :
++  {
++    *(.ARM.extab* .gnu.linkonce.armextab.*)
++  } > m_text
++
++  .ARM :
++  {
++    __exidx_start = .;
++    *(.ARM.exidx*)
++    __exidx_end = .;
++  } > m_text
++
++  .ctors :
++  {
++    __CTOR_LIST__ = .;
++    KEEP (*crtbegin.o(.ctors))
++    KEEP (*crtbegin?.o(.ctors))
++    KEEP (*(EXCLUDE_FILE(*crtend?.o *crtend.o) .ctors))
++    KEEP (*(SORT(.ctors.*)))
++    KEEP (*(.ctors))
++    __CTOR_END__ = .;
++  } > m_text
++
++  .dtors :
++  {
++    __DTOR_LIST__ = .;
++    KEEP (*crtbegin.o(.dtors))
++    KEEP (*crtbegin?.o(.dtors))
++    KEEP (*(EXCLUDE_FILE(*crtend?.o *crtend.o) .dtors))
++    KEEP (*(SORT(.dtors.*)))
++    KEEP (*(.dtors))
++    __DTOR_END__ = .;
++  } > m_text
++
++  .preinit_array :
++  {
++    PROVIDE_HIDDEN (__preinit_array_start = .);
++    KEEP (*(.preinit_array*))
++    PROVIDE_HIDDEN (__preinit_array_end = .);
++  } > m_text
++
++  .init_array :
++  {
++    PROVIDE_HIDDEN (__init_array_start = .);
++    KEEP (*(SORT(.init_array.*)))
++    KEEP (*(.init_array*))
++    PROVIDE_HIDDEN (__init_array_end = .);
++  } > m_text
++
++  .fini_array :
++  {
++    PROVIDE_HIDDEN (__fini_array_start = .);
++    KEEP (*(SORT(.fini_array.*)))
++    KEEP (*(.fini_array*))
++    PROVIDE_HIDDEN (__fini_array_end = .);
++  } > m_text
++
++  __etext = .;
++  __DATA_ROM = .;
++
++  /* Initialized data, in OCRAM. Copied by startup from __etext.
++     lv_*.o data lives in the separate LVGL region below (re-initialized
++     manually by omv_main.c between script runs). */
++  .data : AT(__DATA_ROM)
++  {
++    . = ALIGN(4);
++    __DATA_RAM = .;
++    __data_start__ = .;
++    *(EXCLUDE_FILE(*lv_*.o) .data)
++    *(EXCLUDE_FILE(*lv_*.o) .data*)
++    *(.dmaFramebuffer)
++    KEEP(*(.jcr*))
++    . = ALIGN(4);
++    __data_end__ = .;
++  } > m_ocram
++
++  /* RAM code (ITCM): .ram_code plus the flash/clock drivers that must not
++     execute from XIP flash while it is being reprogrammed (Keil region
++     ER_ITCM/OVERLAY_FLASH). Copied by startup right after .data — the
++     startup copy pointer runs on from __etext, so the LMAs must stay
++     contiguous: [.data][.ram_function][.ncache.init]. */
++  __RAM_FUNCTION_ROM = __DATA_ROM + (__data_end__ - __data_start__);
++  .ram_function : AT(__RAM_FUNCTION_ROM)
++  {
++    . = ALIGN(4);
++    __ram_function_start__ = .;
++    *(.ram_code)
++    *(.ocram .ocram*)   /* LVGL LV_ATTRIBUTE_FAST_MEM code */
++    *fsl_flexspi.o(.text .text*)
++    *fsl_flash.o(.text .text*)
++    *drv_norflash.o(.text .text*)
++    *fsl_clock.o(.text .text*)
++    . = ALIGN(4);
++    __ram_function_end__ = .;
++  } > m_itcm
++
++  /* Non-cacheable data (SDRAM window covered by the MPU ncache setup):
++     USB DMA buffers and RT-Thread NonCacheable sections. */
++  __NDATA_ROM = __RAM_FUNCTION_ROM + (__ram_function_end__ - __ram_function_start__);
++  .ncache.init : AT(__NDATA_ROM)
++  {
++    . = ALIGN(4);
++    __noncachedata_start__ = .;
++    *(NonCacheable.init)
++    *(m_usb_dma_init_data)
++    *(*m_usb_dma_init_data)
++    . = ALIGN(4);
++    __noncachedata_init_end__ = .;
++  } > m_ncache
++
++  .ncache (NOLOAD) :
++  {
++    *(NonCacheable)
++    *(.usb_buf)
++    *(m_usb_dma_noninit_data)
++    *(*m_usb_dma_noninit_data)
++    . = ALIGN(4);
++    __noncachedata_end__ = .;
++  } > m_ncache
++
++  /* LVGL RW+ZI region (Keil ER_LVGL_ZI_DATA). NOT copied by startup:
++     omv_main.c copies/zeroes it from the Load$$ symbols each time the
++     MicroPython environment restarts. */
++  __LVGL_DATA_ROM = __NDATA_ROM + (__noncachedata_init_end__ - __noncachedata_start__);
++  .lvgl_data : AT(__LVGL_DATA_ROM)
++  {
++    . = ALIGN(4);
++    Image$$ER_LVGL_ZI_DATA$$Base = .;
++    *lv_*.o(.data .data*)
++    . = ALIGN(4);
++    Image$$ER_LVGL_ZI_DATA$$ZI$$Base = .;
++  } > m_ocram
++  PROVIDE(Load$$ER_LVGL_ZI_DATA$$Base = __LVGL_DATA_ROM);
++  PROVIDE(Load$$ER_LVGL_ZI_DATA$$Limit = __LVGL_DATA_ROM + SIZEOF(.lvgl_data));
++
++  .lvgl_bss (NOLOAD) :
++  {
++    *lv_*.o(.bss .bss* COMMON)
++    . = ALIGN(4);
++    Image$$ER_LVGL_ZI_DATA$$ZI$$Limit = .;
++  } > m_ocram
++
++  __DATA_END = __LVGL_DATA_ROM + SIZEOF(.lvgl_data);
++  text_end = ORIGIN(m_text) + LENGTH(m_text);
++  ASSERT(__DATA_END <= text_end, "region m_text overflowed with text and data")
++
++  /* Uninitialized data, in OCRAM (zeroed by startup, __STARTUP_CLEAR_BSS). */
++  .bss (NOLOAD) :
++  {
++    . = ALIGN(4);
++    __START_BSS = .;
++    __bss_start__ = .;
++    *(EXCLUDE_FILE(*lv_*.o) .bss)
++    *(EXCLUDE_FILE(*lv_*.o) .bss*)
++    *(EXCLUDE_FILE(*lv_*.o) COMMON)
++    . = ALIGN(4);
++    __bss_end__ = .;
++    __END_BSS = .;
++  } > m_ocram
++
++  /* TFLite/NNCU weight cache (Keil WEIT_CACHE_AREA). */
++  .weit_cache (NOLOAD) :
++  {
++    . = ALIGN(16);
++    Image$$WEIT_CACHE_AREA$$Base = .;
++    . += WEIT_CACHE_SIZE;
++  } > m_ocram
++
++  /* newlib heap (_sbrk uses `end`). */
++  .heap (NOLOAD) :
++  {
++    . = ALIGN(8);
++    __end__ = .;
++    PROVIDE(end = .);
++    __HeapBase = .;
++    . += NEWLIB_HEAP_SIZE;
++    __HeapLimit = .;
++    __heap_limit = .;
++  } > m_ocram
++
++  /* DTCM: fb_alloc overlay (fast memory) + main stack on top. */
++  .fb_alloc_overlay (NOLOAD) :
++  {
++    . = ALIGN(16);
++    Image$$OMV_FB_ALLOC_OVERLAY$$Base = .;
++    . += FB_ALLOC_OVERLAY_SIZE;
++    Image$$OMV_FB_ALLOC_OVERLAY_END$$Base = .;
++  } > m_dtcm
++  PROVIDE(_fballoc_overlay = Image$$OMV_FB_ALLOC_OVERLAY_END$$Base);
++
++  .stack (NOLOAD) :
++  {
++    . = ALIGN(8);
++    Image$$ARM_LIB_STACK$$ZI$$Base = .;
++    . += STACK_SIZE;
++    Image$$ARM_LIB_STACK$$ZI$$Limit = .;
++  } > m_dtcm
++
++  __StackTop   = ORIGIN(m_dtcm) + LENGTH(m_dtcm);
++  __StackLimit = __StackTop - STACK_SIZE;
++  PROVIDE(__stack = __StackTop);
++
++  /* SDRAM layout (Keil RW_SRAM...RW_SRAM_END). All NOLOAD. */
++  .rtt_heap (NOLOAD) :
++  {
++    . = ALIGN(16);
++    Image$$RTT_HEAP$$Base = .;
++    Image$$RTT_HEAP$$ZI$$Base = .;
++    . += RTT_HEAP_SIZE;
++    Image$$RTT_HEAP$$ZI$$Limit = .;
++  } > m_sdram
++  /* GCC-branch aliases used by board.h */
++  PROVIDE(heap_start = Image$$RTT_HEAP$$ZI$$Base);
++  PROVIDE(heap_end = Image$$RTT_HEAP$$ZI$$Limit);
++
++  .mpy_thread_stack (NOLOAD) :
++  {
++    . = ALIGN(16);
++    Image$$RTT_MPY_THREAD_STACK$$Base = .;
++    . += MPY_THREAD_STACK_SIZE;
++  } > m_sdram
++
++  .mpy_heap (NOLOAD) :
++  {
++    . = ALIGN(16);
++    Image$$MPY_HEAP_START$$Base = .;
++    . += MPY_HEAP_SIZE;
++  } > m_sdram
++
++  .sensor_buffer (NOLOAD) :
++  {
++    . = ALIGN(16);
++    Image$$MPY_SENSOR_BUFER_START$$Base = .;
++    . += SENSOR_BUFFER_SIZE;
++    Image$$MPY_SENSOR_BUFER_START$$Limit = .;
++  } > m_sdram
++
++  .omv_main_fb (NOLOAD) :
++  {
++    . = ALIGN(16);
++    Image$$OMV_MAIN_FB$$Base = .;
++    . += OMV_FB_TOTAL_SIZE;
++    Image$$OMV_FB_END$$Base = .;
++    . += 16;
++  } > m_sdram
++  PROVIDE(_fballoc = Image$$OMV_FB_END$$Base);
++  PROVIDE(_fb_base = Image$$OMV_MAIN_FB$$Base);
++
++  /* IDE JPEG stream buffer (Keil: s_jpegBuf in .jpeg_buf, OMV_JPEG_BUF_SIZE) */
++  .jpeg_buf (NOLOAD) :
++  {
++    . = ALIGN(16);
++    _jpeg_buf = .;
++    *(.jpeg_buf)
++    . += 48K;
++  } > m_sdram
++
++  .lcd_fb (NOLOAD) :
++  {
++    . = ALIGN(64);
++    *(.lcd_fb)
++    . += LCD_FB_SIZE;
++  } > m_sdram
++
++  .ARM.attributes 0 : { *(.ARM.attributes) }
++}
+diff --git a/bsp/imxrt/imxrt1062-nxp-evk/rtconfig.py b/bsp/imxrt/imxrt1062-nxp-evk/rtconfig.py
+index 69f9646..6678c3b 100644
+--- a/bsp/imxrt/imxrt1062-nxp-evk/rtconfig.py
++++ b/bsp/imxrt/imxrt1062-nxp-evk/rtconfig.py
+@@ -44,8 +44,8 @@ if PLATFORM == 'gcc':
+ 
+     DEVICE = ' -mcpu=' + CPU + ' -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard -ffunction-sections -fdata-sections'
+     CFLAGS = DEVICE + ' -Wall -D__FPU_PRESENT -eentry'
+-    AFLAGS = ' -c' + DEVICE + ' -x assembler-with-cpp -Wa,-mimplicit-it=thumb -D__START=entry'
+-    LFLAGS = DEVICE + ' -lm -lgcc -lc' + ' -nostartfiles -Wl,--gc-sections,-Map=rtthread.map,-cref,-u,Reset_Handler -T board/linker_scripts/link.lds'
++    AFLAGS = ' -c' + DEVICE + ' -x assembler-with-cpp -Wa,-mimplicit-it=thumb -D__START=entry -D__STARTUP_CLEAR_BSS -D__STARTUP_INITIALIZE_RAMFUNCTION -D__STARTUP_INITIALIZE_NONCACHEDATA'
++    LFLAGS = DEVICE + ' -lstdc++ -lm -lgcc -lc' + ' -nostartfiles -Wl,--gc-sections,-Map=rtthread.map,-cref,-u,Reset_Handler -T board/linker_scripts/link.lds'
+ 
+     CPATH = ''
+     LPATH = ''
+diff --git a/bsp/imxrt/libraries/sensors/drv_camera_int.c b/bsp/imxrt/libraries/sensors/drv_camera_int.c
+index 75e0732..fb86305 100644
+--- a/bsp/imxrt/libraries/sensors/drv_camera_int.c
++++ b/bsp/imxrt/libraries/sensors/drv_camera_int.c
+@@ -28,6 +28,10 @@
+ #include "fsl_csi.h"
+ #include "py/mpprint.h"
+ #include "irq.h"
++
++#ifndef RAM_CODE
++#define RAM_CODE __attribute__((section(".ram_code")))
++#endif
+ #include "sensor.h"
+ #include "drv_camera.h"
+ #include "ov9650.h"
