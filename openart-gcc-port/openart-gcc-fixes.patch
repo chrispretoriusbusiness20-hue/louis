@@ -1,0 +1,70 @@
+diff --git a/bsp/imxrt/components/micropython-nxp/extmod/irqmap.c b/bsp/imxrt/components/micropython-nxp/extmod/irqmap.c
+index 495c963..a6f9b98 100644
+--- a/bsp/imxrt/components/micropython-nxp/extmod/irqmap.c
++++ b/bsp/imxrt/components/micropython-nxp/extmod/irqmap.c
+@@ -127,14 +127,14 @@ __WEAK void QTmr_SRPMHandler(unsigned ndx, int submod)
+ {
+     QTmr_DefaultHandler(ndx, submod);
+ }
+-static int index[4]= {0};
++static int qtmr_submod_index[4]= {0};
+ uint32_t QTmrGetSubModule(TMR_Type* base)
+ {
+     for(int i = 0; i < 4; i++)
+     {
+ 		#ifdef BSP_USING_SERVO
+         if(QTMR_GetEnabledInterrupts(base, i)&QTMR_GetStatus(base, i))
+-            index[i] = i + 1;
++            qtmr_submod_index[i] = i + 1;
+ 		#endif
+     }
+ 	return 0;
+@@ -163,7 +163,7 @@ void QTmrCommonIrqHandler(unsigned ndx)
+     // for each SM do:
+     for(int i = 0; i < 4; i++)
+     {
+-        if(index[i] != 0)
++        if(qtmr_submod_index[i] != 0)
+         {
+             unsigned slot = kIrqSlot_QT1_0 + (ndx - 1) * 4 + i;
+             IrqFuncs_e func = IRQMAP_Get(slot);
+diff --git a/bsp/imxrt/components/micropython-nxp/port/mpy_main.c b/bsp/imxrt/components/micropython-nxp/port/mpy_main.c
+index 92ba0bf..d9aa55c 100644
+--- a/bsp/imxrt/components/micropython-nxp/port/mpy_main.c
++++ b/bsp/imxrt/components/micropython-nxp/port/mpy_main.c
+@@ -172,7 +172,6 @@ void mpy_main(const char *filename) {
+     mp_stack_set_limit(rt_thread_self()->stack_size - 1024);
+ 
+ #if MICROPY_ENABLE_GC
+-	extern uint32_t Image$$MPY_HEAP_START$$Base;
+     heap = (char *) &Image$$MPY_HEAP_START$$Base;
+ 	
+     gc_init(heap, heap + MICROPY_HEAP_SIZE);
+diff --git a/bsp/imxrt/components/micropython-nxp/py/nlr.h b/bsp/imxrt/components/micropython-nxp/py/nlr.h
+index 2fdee69..549c2f7 100644
+--- a/bsp/imxrt/components/micropython-nxp/py/nlr.h
++++ b/bsp/imxrt/components/micropython-nxp/py/nlr.h
+@@ -42,6 +42,10 @@
+ #define MICROPY_NLR_NUM_REGS_XTENSA         (10)
+ #define MICROPY_NLR_NUM_REGS_XTENSAWIN      (17)
+ 
++// Pull in setjmp.h while __arm__/__thumb__ are still defined: newlib's
++// machine/setjmp.h needs them to select _JBLEN and typedef jmp_buf.
++#include <setjmp.h>
++
+ #undef __arm__
+ #undef __thumb__
+ #undef __thumb2__
+diff --git a/bsp/imxrt/imxrt1062-nxp-evk/board/SConscript b/bsp/imxrt/imxrt1062-nxp-evk/board/SConscript
+index 6d15c6b..7e6cb4a 100644
+--- a/bsp/imxrt/imxrt1062-nxp-evk/board/SConscript
++++ b/bsp/imxrt/imxrt1062-nxp-evk/board/SConscript
+@@ -19,7 +19,7 @@ if GetDepend(['NXP_USING_MICROPYTHON']):
+ 
+ CPPPATH = [cwd,cwd + '/MCUX_Config',cwd + '/ports']
+ 
+-CPPDEFINES = ['CPU_MIMXRT1062DVL6A', 'STD=C99', 'SKIP_SYSCLK_INIT', 'EVK_MCIMXRM', 'FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL','XIP_EXTERNAL_FLASH=1', 'XIP_BOOT_HEADER_ENABLE=1,ARM_MATH_CM7,__FPU_PRESENT,FFCONF_H=\"oofatfs/ffconf.h\",HARD_FP,FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL=1']
++CPPDEFINES = ['CPU_MIMXRT1062DVL6A', 'STD=C99', 'SKIP_SYSCLK_INIT', 'EVK_MCIMXRM', 'FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL','XIP_EXTERNAL_FLASH=1', 'XIP_BOOT_HEADER_ENABLE=1', 'ARM_MATH_CM7', '__FPU_PRESENT', 'FFCONF_H=\\"oofatfs/ffconf.h\\"', 'HARD_FP', 'FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL=1']
+ 
+ LOCAL_CCFLAGS = ''    
+ if rtconfig.CROSS_TOOL == 'gcc':
