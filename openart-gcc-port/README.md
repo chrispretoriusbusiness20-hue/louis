@@ -1,48 +1,63 @@
-# OpenART on Linux with GCC — setup notes and fixes
+# OpenART on Linux with GCC — complete port
 
-Working notes from getting [nxp-mcuxpresso/OpenART](https://github.com/nxp-mcuxpresso/OpenART)
-building on Linux with the GNU Arm toolchain, instead of the officially
+Working port of [nxp-mcuxpresso/OpenART](https://github.com/nxp-mcuxpresso/OpenART)
+(imxrt1062-nxp-evk BSP) to Linux + GNU Arm GCC, replacing the officially
 supported Windows + Keil MDK flow.
 
-## Status
+## Status: BUILDS ✅
 
-- RT-Thread kernel, board support, drivers, and the MicroPython core **compile**
-  with the recipe below plus `openart-gcc-fixes.patch`.
-- Final linking is **not yet possible with GCC**: the i.MX RT1062 BSP ships only
-  Keil scatter files (`board/linker_scripts/*.sct`) — the `link.lds` referenced
-  by `rtconfig.py` does not exist in the repo — and nine source files use
-  Keil-only `Image$$...$$` linker symbols (OpenMV framebuffer/heap setup,
-  MicroPython heap, model overlays). Completing the port means authoring the
-  full memory map (ITCM/DTCM/OCRAM/SDRAM, XIP boot header, overlay sections)
-  as a GNU ld script and porting those symbol usages.
-- For real hardware work today, use the supported path: Windows + Keil MDK
-  ≥ 5.33, `scons --target=mdk5 -s` in the BSP folder, build and flash in Keil.
+`scons` now produces `rtthread.elf` / `rtthread.bin` (≈2.4 MB XIP image):
+
+```
+   text    data      bss
+2457620    8792 23154636   rtthread.elf
+```
+
+RT-Thread kernel, board support, drivers, MicroPython, OpenMV, LVGL, and the
+prebuilt TFLite-Micro/NNCU libraries all link. The large BSS is the SDRAM
+framebuffer/heap layout. **Not yet validated on hardware** — the image boots
+the same XIP boot-header path Keil used, but flash it expecting to debug.
 
 ## Toolchain recipe (Ubuntu 24.04)
 
 Version choices matter — newer components break on this vintage codebase:
 
-| Component | Version | Why this version |
+| Component | Version | Why |
 |---|---|---|
-| SCons | 4.4.0 (`pip install scons==4.4.0`) | SCons ≥ 4.5 makes `CPPDEFINES` a deque; OpenART's `tools/building.py` concatenates it with a list and crashes. |
-| ARM GCC | 9-2019-q4 (Ubuntu 20.04 `gcc-arm-none-eabi` deb) | GCC 13 ships newlib 4.3, whose unconditional `sigval`/`sigevent`/`siginfo_t` definitions collide with RT-Thread's bundled `libc_signal.h`. |
-| newlib | 3.3.0 (`libnewlib-arm-none-eabi` + `libnewlib-dev` focal debs) | Matches GCC 9 era; still needs the `cconfig.h` below. |
-| libisl22 | 0.22.1 focal deb | Runtime dependency of the GCC 9 deb on 24.04. |
+| SCons | 4.4.0 (`pip install scons==4.4.0`) | SCons ≥ 4.5 makes `CPPDEFINES` a deque; `tools/building.py` crashes concatenating it with a list. |
+| ARM GCC | 9-2019-q4 (Ubuntu 20.04 `gcc-arm-none-eabi` deb) | GCC 13's newlib 4.3 collides with RT-Thread's bundled `libc_signal.h`. |
+| newlib | 3.3.0 (`libnewlib-arm-none-eabi` + `libnewlib-dev` focal debs) | Matches GCC 9; still needs the `cconfig.h` below. |
+| libisl22 | 0.22.1 focal deb | Dependency of the GCC 9 deb on 24.04. |
 
 The focal debs install cleanly on 24.04 with `dpkg -i` after removing the
 24.04 `gcc-arm-none-eabi`/newlib packages.
 
-## cconfig.h
+## Build
 
-RT-Thread's GCC autodetection (`tools/gcc.py`) scans newlib headers relative to
-the toolchain `EXEC_PATH`, which doesn't match Ubuntu's split layout
-(`/usr/include/newlib`), so it generates an empty `cconfig.h` and the signal
-types collide anyway. Overwrite `bsp/imxrt/imxrt1062-nxp-evk/cconfig.h` with:
+```sh
+git apply openart-gcc-fixes.patch          # in the OpenART checkout
+# write cconfig.h (below) into bsp/imxrt/imxrt1062-nxp-evk/
+# convert the Keil libs once:
+cd bsp/imxrt/components/openmv-nxp
+cp nncu/nncie_m4_m7_m33_sp_cmsisnn.lib nncu/libnncie_m4_m7_m33_sp_cmsisnn.a
+cp libtf/cortex-m7/libtf.lib libtf/cortex-m7/libtf.a
+cp libtf/cortex-m7/libtf_person_detect_model_data.lib libtf/cortex-m7/libtf_person_detect_model_data.a
+cd ../../imxrt1062-nxp-evk
+RTT_EXEC_PATH=/usr/bin scons -j4
+```
+
+The Keil `.lib` archives contain armclang EABI5 ELF objects — GNU ld links
+them directly once they have `lib*.a` names.
+
+### cconfig.h
+
+RT-Thread's GCC autodetection scans newlib relative to `EXEC_PATH`, which
+doesn't match Ubuntu's layout, so it generates an empty file. Overwrite
+`bsp/imxrt/imxrt1062-nxp-evk/cconfig.h` with:
 
 ```c
 #ifndef CCONFIG_H__
 #define CCONFIG_H__
-/* compiler configure file for RT-Thread in GCC */
 #define HAVE_NEWLIB_H 1
 #define LIBC_VERSION "newlib 3.3.0"
 #define HAVE_SYS_SIGNAL_H 1
@@ -57,37 +72,53 @@ types collide anyway. Overwrite `bsp/imxrt/imxrt1062-nxp-evk/cconfig.h` with:
 #endif
 ```
 
-(The build only regenerates it when missing, so a hand-written one sticks.)
+## What the patch contains (12 files)
 
-## Source fixes
+**Compile fixes**
+1. `board/SConscript` — defines jammed into one comma-separated string
+   (armcc tolerated it, GCC errors); also guards the Windows-only
+   `make-pins.py` regeneration that clobbers the checked-in pins file with an
+   empty one on Linux.
+2. `py/nlr.h` — `#undef __arm__` before `<setjmp.h>` blanked newlib's arch
+   detection so `jmp_buf` never existed; include setjmp first.
+3. `extmod/irqmap.c` — `static int index[4]` vs libc `index()`.
+4. `mpy_main.c` — duplicate `Image$$MPY_HEAP_START$$Base` extern with
+   conflicting type.
+5. `omv_main.c`, `omv/fb_alloc.c` — extend the Keil `#if` branches to
+   `__GNUC__` (the GCC branches were empty stubs upstream).
+6. `omv/img/fmath.c` — `fast_fabsf` was C99 `inline` without an extern
+   definition; de-inlined.
+7. `libraries/sensors/drv_camera_int.c` — `RAM_CODE` macro was never defined
+   anywhere; defined as `section(".ram_code")`.
 
-Apply `openart-gcc-fixes.patch` from this directory (`git apply`) on top of
-OpenART `master`. What it fixes:
+**The GCC link layer (the part Keil provided before)**
+8. `board/linker_scripts/link.lds` — NEW: full GNU ld script merging the NXP
+   SDK skeleton with OpenART's Keil scatter layout. Provides every
+   `Image$$...$$`/`Load$$...$$` symbol the sources consume, the RT-Thread
+   init/FinSH tables, and the memory map: XIP flash boot header → ITCM
+   (RAM code incl. flash drivers + LVGL fast code) → DTCM (fb_alloc overlay
+   120K + 8K MSP stack) → OCRAM 768K (data/bss/LVGL/weight-cache) → SDRAM
+   (RTT heap, MPY thread stack + 4M heap, 6M sensor buffer, 10M OMV
+   framebuffer, 48K JPEG buffer, 1M LCD framebuffer) → 2M non-cacheable
+   window (USB DMA buffers). Uses the fused-default FlexRAM banking
+   (128K/128K/256K) — the Keil scatter assumed more DTCM than the chip
+   default provides.
+9. `board/gcc_compat.c` — NEW: shims for the armclang-built ML libraries:
+   `__hardfp_*` math, `__aeabi_assert`/`__aeabi_errno_addr`/`__stderr`,
+   `operator new/delete` on the RT-Thread heap, and no-op libc++
+   `ios_base::Init` stubs.
+10. `board/board.c` — run C++ static constructors via `__libc_init_array()`
+    under GCC (Keil did it via `$Super$$__cpp_initialize__aeabi_` patching).
+11. `rtconfig.py` — assemble startup with `-D__STARTUP_CLEAR_BSS
+    -D__STARTUP_INITIALIZE_RAMFUNCTION -D__STARTUP_INITIALIZE_NONCACHEDATA`
+    (otherwise BSS is never cleared with `-nostartfiles`).
 
-1. **`bsp/imxrt/imxrt1062-nxp-evk/board/SConscript`** — six preprocessor
-   defines were jammed into one comma-separated string
-   (`'XIP_BOOT_HEADER_ENABLE=1,ARM_MATH_CM7,...'`); armcc tolerated it, GCC
-   errors with `token "=" is not valid in preprocessor expressions`.
-2. **`components/micropython-nxp/py/nlr.h`** — the port `#undef`s
-   `__arm__`/`__thumb__` (to force setjmp-based NLR) *before* including
-   `<setjmp.h>`; with those gone, newlib's `machine/setjmp.h` can't detect the
-   architecture and never typedefs `jmp_buf`. Fix: include `<setjmp.h>` before
-   the `#undef`s.
-3. **`components/micropython-nxp/extmod/irqmap.c`** — a file-scope
-   `static int index[4]` collides with libc's BSD `index()`; renamed.
-4. **`components/micropython-nxp/port/mpy_main.c`** — duplicate `extern`
-   declaration of `Image$$MPY_HEAP_START$$Base` with a conflicting type
-   (`uint32_t` is `unsigned long` on newlib ARM; the earlier declaration says
-   `unsigned int`).
+## Known caveats
 
-## Build
-
-```sh
-cd bsp/imxrt/imxrt1062-nxp-evk
-RTT_EXEC_PATH=/usr/bin scons -j4
-```
-
-Compilation currently stops in `components/openmv-nxp/omv_main.c` at
-`_heap_start` / `_thread_stack_start` — linker-provided symbols the GCC code
-path expects but no linker script defines. That's the start of the remaining
-porting work described under **Status**.
+- armclang libs use 2-byte `wchar_t` (link warning; wchar is unused on target).
+- `__stderr` writes from the armclang libs are dropped (inert stub).
+- The Keil build placed `gc.o`/CMSIS-NN hot code in ITCM for speed; the GCC
+  script currently only pins `.ram_code`, LVGL fast code, and the flash
+  drivers there. Perf tuning headroom remains (~100K ITCM free).
+- Runtime validation (boot, MicroPython REPL, camera, TFLite inference)
+  requires a physical MIMXRT1060-EVK/OpenART board.
