@@ -1,0 +1,65 @@
+# Free AI Video Generation — ComfyUI Setup
+
+This directory installs [ComfyUI](https://github.com/comfyanonymous/ComfyUI),
+the leading free and open-source AI video generation software, together with
+video-focused custom nodes and (optionally) free open-weight video models.
+Everything runs locally on your own machine — no subscription, no credits,
+no watermarks.
+
+## Quick start
+
+```bash
+cd ai-video
+./install.sh                     # install ComfyUI into ./ComfyUI
+./install.sh --with-model ltx    # ...and download the LTX-Video model (~6 GB)
+```
+
+Then start it:
+
+```bash
+cd ComfyUI
+source venv/bin/activate
+python main.py        # add --cpu if you have no NVIDIA GPU
+```
+
+Open **http://127.0.0.1:8188** in your browser. In the ComfyUI interface go to
+**Workflow → Browse Templates → Video** to load a ready-made text-to-video or
+image-to-video workflow, type a prompt, and click **Queue**.
+
+## What gets installed
+
+| Component | Purpose |
+|---|---|
+| ComfyUI | Node-based UI and engine for image/video generation |
+| ComfyUI-Manager | In-app installer for models and extra nodes |
+| VideoHelperSuite | Video combine/export nodes (MP4, GIF, WebM) |
+| PyTorch | CUDA build if an NVIDIA GPU is detected, otherwise CPU build |
+
+## Free video models (open weights)
+
+| Model | Flag | Size | Notes |
+|---|---|---|---|
+| LTX-Video 2B (distilled) | `--with-model ltx` | ~6 GB | Fastest; near-real-time on a good GPU |
+| Wan 2.1 T2V 1.3B | `--with-model wan` | ~5 GB | Excellent quality for its size; runs in ~8 GB VRAM |
+
+Both are free to download and use. More models (Hunyuan Video, Mochi,
+AnimateDiff, Stable Video Diffusion) can be installed from the **Manager**
+tab inside ComfyUI.
+
+## Hardware requirements
+
+- **NVIDIA GPU with 8 GB+ VRAM** — recommended. Both bundled models fit in
+  8 GB; generation takes seconds to a few minutes per clip.
+- **CPU only** — works (`python main.py --cpu`) but is very slow: expect many
+  minutes to hours per clip. Fine for trying the software, not for production.
+- **Disk**: ~10 GB for the software, plus 5–6 GB per model.
+- **OS**: Linux, macOS, or Windows (run `install.sh` from Git Bash or WSL on
+  Windows).
+
+## Troubleshooting
+
+- **Out of VRAM**: launch with `python main.py --lowvram`.
+- **Model not showing in a workflow node**: confirm the file landed in the
+  right `ComfyUI/models/...` subfolder, then press **R** to refresh the UI.
+- **Slow first run**: models are loaded into memory on first use; later runs
+  are faster.
