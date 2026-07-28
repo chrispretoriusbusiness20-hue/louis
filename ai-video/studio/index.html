@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local AI Video Studio</title>
+<style>
+  :root {
+    --bg: #0b0b10; --panel: #14141c; --panel2: #1b1b26;
+    --text: #ececf1; --muted: #8b8b9e; --accent: #7c5cff; --accent2: #b14cf0;
+    --border: #262636; --error: #ff5c7a; --ok: #4cd98a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100vh;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 18px 28px; border-bottom: 1px solid var(--border);
+  }
+  header .logo {
+    width: 34px; height: 34px; border-radius: 9px; flex: none;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 13px; margin-left: auto; }
+  main { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+  .banner {
+    display: none; margin-bottom: 18px; padding: 12px 16px; border-radius: 10px;
+    background: #2a1520; border: 1px solid var(--error); color: #ffb3c2;
+    font-size: 14px; line-height: 1.5; white-space: pre-wrap;
+  }
+  .banner.ok { background: #12241a; border-color: var(--ok); color: #a9edc6; }
+  .composer {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 18px;
+  }
+  textarea {
+    width: 100%; min-height: 84px; resize: vertical; border-radius: 10px;
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    padding: 12px 14px; font-size: 15px; font-family: inherit; outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+  .presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
+  .chip {
+    padding: 6px 13px; border-radius: 999px; font-size: 13px; cursor: pointer;
+    background: var(--panel2); color: var(--muted); border: 1px solid var(--border);
+  }
+  .chip.active {
+    color: #fff; border-color: transparent;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+  }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: end; margin-top: 14px;
+  }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  select, input[type=number] {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 14px;
+  }
+  #go {
+    margin-left: auto; border: 0; border-radius: 10px; cursor: pointer;
+    padding: 12px 26px; font-size: 15px; font-weight: 600; color: #fff;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+  }
+  #go:disabled { opacity: .5; cursor: default; }
+  .progress { display: none; margin-top: 16px; }
+  .bar {
+    height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden;
+  }
+  .bar > div {
+    height: 100%; width: 30%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    animation: slide 1.4s ease-in-out infinite;
+  }
+  @keyframes slide { 0% {margin-left:-30%} 100% {margin-left:100%} }
+  .progress p { margin-top: 8px; font-size: 13px; color: var(--muted); }
+  h2 { font-size: 15px; color: var(--muted); font-weight: 600; margin: 34px 0 14px; }
+  .gallery {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  .card video { width: 100%; display: block; background: #000; aspect-ratio: 16/9; }
+  .card p {
+    padding: 10px 12px; font-size: 12.5px; color: var(--muted); line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .empty { color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"></div>
+  <h1>Local AI Video Studio</h1>
+  <span class="sub">Wan 2.1 · runs 100% on your machine</span>
+</header>
+<main>
+  <div id="banner" class="banner"></div>
+
+  <div class="composer">
+    <textarea id="prompt" placeholder="Describe your video… e.g. a golden retriever running through shallow ocean waves at sunset, splashes in slow motion"></textarea>
+    <div class="presets" id="presets"></div>
+    <div class="controls">
+      <div class="field">
+        <label>Size</label>
+        <select id="size">
+          <option value="832x480" selected>832 × 480 · landscape</option>
+          <option value="480x832">480 × 832 · portrait</option>
+          <option value="624x624">624 × 624 · square</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Duration</label>
+        <select id="seconds">
+          <option value="2">2 s</option>
+          <option value="3" selected>3 s</option>
+          <option value="5">5 s</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Quality (steps)</label>
+        <select id="steps">
+          <option value="15">Draft · 15</option>
+          <option value="30" selected>Standard · 30</option>
+          <option value="45">High · 45</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Seed (blank = random)</label>
+        <input type="number" id="seed" placeholder="random" style="width:120px">
+      </div>
+      <button id="go">Generate</button>
+    </div>
+    <div class="progress" id="progress">
+      <div class="bar"><div></div></div>
+      <p id="progress-text">Queued…</p>
+    </div>
+  </div>
+
+  <h2>Your generations</h2>
+  <div class="gallery" id="gallery"></div>
+  <p class="empty" id="empty">Nothing yet — your finished videos will appear here.</p>
+</main>
+
+<script>
+const PRESETS = [
+  { name: "None", suffix: "" },
+  { name: "Cinematic", suffix: "cinematic film still, shallow depth of field, dramatic lighting, film grain" },
+  { name: "Slow push-in", suffix: "slow smooth camera push-in toward the subject" },
+  { name: "Drone shot", suffix: "sweeping aerial drone shot, wide angle" },
+  { name: "Handheld", suffix: "handheld documentary camera, natural motion" },
+  { name: "Anime", suffix: "anime style, vibrant colors, detailed 2D animation" },
+  { name: "3D render", suffix: "polished 3D render, octane, soft studio lighting" },
+  { name: "Timelapse", suffix: "timelapse, fast moving clouds and light" },
+];
+let activePreset = 0;
+
+const $ = id => document.getElementById(id);
+
+function renderPresets() {
+  $("presets").innerHTML = "";
+  PRESETS.forEach((p, i) => {
+    const chip = document.createElement("span");
+    chip.className = "chip" + (i === activePreset ? " active" : "");
+    chip.textContent = p.name;
+    chip.onclick = () => { activePreset = i; renderPresets(); };
+    $("presets").appendChild(chip);
+  });
+}
+
+function banner(msg, ok) {
+  const el = $("banner");
+  if (!msg) { el.style.display = "none"; return; }
+  el.textContent = msg;
+  el.className = "banner" + (ok ? " ok" : "");
+  el.style.display = "block";
+}
+
+async function checkStatus() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    if (!s.comfy) {
+      banner("ComfyUI is not running. Start it first:\n  cd ../ComfyUI && source venv/bin/activate && python main.py\nthen reload this page.");
+      return false;
+    }
+    if (s.missing_models.length) {
+      banner("Missing model files: " + s.missing_models.join(", ") +
+             "\nDownload them with:  ./install.sh --with-model wan   (from the ai-video folder)");
+      return false;
+    }
+    banner("");
+    return true;
+  } catch { banner("Studio server error — is server.py still running?"); return false; }
+}
+
+async function loadGallery() {
+  try {
+    const items = await (await fetch("/api/gallery")).json();
+    $("empty").style.display = items.length ? "none" : "block";
+    $("gallery").innerHTML = "";
+    for (const it of items) {
+      const card = document.createElement("div");
+      card.className = "card";
+      const src = "/api/video?" + new URLSearchParams(
+        { filename: it.filename, subfolder: it.subfolder });
+      card.innerHTML = `<video src="${src}" controls loop muted playsinline></video>` +
+                       `<p></p>`;
+      card.querySelector("p").textContent = it.prompt || it.filename;
+      $("gallery").appendChild(card);
+    }
+  } catch { /* gallery is best-effort */ }
+}
+
+async function generate() {
+  const promptText = $("prompt").value.trim();
+  if (!promptText) { $("prompt").focus(); return; }
+  const suffix = PRESETS[activePreset].suffix;
+  const [width, height] = $("size").value.split("x").map(Number);
+  const body = {
+    prompt: suffix ? promptText + ", " + suffix : promptText,
+    width, height,
+    seconds: Number($("seconds").value),
+    steps: Number($("steps").value),
+    seed: $("seed").value || null,
+  };
+  $("go").disabled = true;
+  $("progress").style.display = "block";
+  $("progress-text").textContent = "Submitting…";
+  try {
+    const resp = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "generation failed");
+    await poll(data.prompt_id);
+  } catch (err) {
+    banner(String(err.message || err));
+  } finally {
+    $("go").disabled = false;
+    $("progress").style.display = "none";
+    loadGallery();
+  }
+}
+
+async function poll(promptId) {
+  const started = Date.now();
+  for (;;) {
+    await new Promise(r => setTimeout(r, 2500));
+    const job = await (await fetch("/api/job/" + promptId)).json();
+    const mins = Math.floor((Date.now() - started) / 60000);
+    if (job.state === "done") {
+      banner("Video ready — it's at the top of your gallery.", true);
+      setTimeout(() => banner(""), 6000);
+      return;
+    }
+    if (job.state === "error") throw new Error(job.error);
+    $("progress-text").textContent =
+      job.state === "queued"
+        ? "Queued" + (job.position != null ? ` (position ${job.position + 1})` : "") + "…"
+        : `Generating… ${mins ? mins + " min elapsed — " : ""}this can take a few minutes (much longer on CPU).`;
+  }
+}
+
+$("go").onclick = generate;
+renderPresets();
+checkStatus();
+loadGallery();
+setInterval(loadGallery, 15000);
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-# Free AI Video Generation — ComfyUI Setup
+# Free AI Video Generation — ComfyUI Setup + Local Studio
 
 This directory installs [ComfyUI](https://github.com/comfyanonymous/ComfyUI),
 the leading free and open-source AI video generation software, together with
@@ -25,6 +25,29 @@ python main.py        # add --cpu if you have no NVIDIA GPU
 Open **http://127.0.0.1:8188** in your browser. In the ComfyUI interface go to
 **Workflow → Browse Templates → Video** to load a ready-made text-to-video or
 image-to-video workflow, type a prompt, and click **Queue**.
+
+## Local Studio — your own Higgsfield-style app
+
+`studio/` is a lightweight web app (no extra dependencies) that gives you a
+clean prompt-to-video interface on top of ComfyUI: type a prompt, pick a
+motion/style preset, choose size and duration, hit **Generate**, and watch
+your gallery fill up. It uses the free open-weight **Wan 2.1 T2V 1.3B** model.
+
+```bash
+# one-time: install ComfyUI and the Wan model
+./install.sh --with-model wan
+
+# terminal 1 — start the engine
+cd ComfyUI && source venv/bin/activate && python main.py   # add --cpu if no NVIDIA GPU
+
+# terminal 2 — start the studio
+python3 studio/server.py
+```
+
+Then open **http://127.0.0.1:8189**. The studio talks to ComfyUI on port 8188
+(override with `COMFY_URL=... PORT=... python3 studio/server.py`). If ComfyUI
+isn't running or model files are missing, the studio tells you exactly what to
+do.
 
 ## What gets installed
 
