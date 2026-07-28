@@ -6,7 +6,20 @@ video-focused custom nodes and (optionally) free open-weight video models.
 Everything runs locally on your own machine — no subscription, no credits,
 no watermarks.
 
-## Quick start
+## Quick start (Windows — fully automatic)
+
+Open **PowerShell** (Start menu → type "PowerShell") and paste this one line:
+
+```powershell
+irm https://raw.githubusercontent.com/chrispretoriusbusiness20-hue/louis/claude/free-ai-video-generation-y47dig/ai-video/setup-windows.ps1 | iex
+```
+
+It installs Git and Python if needed, sets up ComfyUI and the studio in
+`C:\Users\<you>\louis`, downloads the free Wan 2.1 model (~5 GB), and opens
+the studio in your browser when done. From then on, just double-click
+**`louis\ai-video\Start-Studio.bat`** to launch everything.
+
+## Quick start (Linux / macOS)
 
 ```bash
 cd ai-video
